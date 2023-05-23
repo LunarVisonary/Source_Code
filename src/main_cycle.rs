@@ -1,8 +1,11 @@
 use crate::prelude::*;
+use crate::SmartPointer::Sr;
 
 pub const SCREEN_WIDTH: i64 = 5;
 pub const SCREEN_HEIGHT: i64 = 3; 
+pub const  SIZE: usize = (SCREEN_HEIGHT * SCREEN_WIDTH) as usize;
 
+#[derive(Copy, Clone)]
 enum Menus {
     MainMenu,
     SaveSelector,
@@ -18,6 +21,20 @@ pub enum SimType {
     Special,
     None
 }
+
+#[derive(Copy, Clone)]
+struct TypeChanges<'a> {
+    new_type: &'a PixelStruct<'a>,
+    bits: f64
+}
+
+#[derive(Copy, Clone)]
+struct Pixel_types<'a> {
+    pixel_type: &'a PixelStruct<'a>,
+    bits: f64,
+    changes: TypeChanges<'a>
+}
+
 #[derive(Clone)]
 pub struct PixelStruct<'a> {
     pixel: &'a str,
@@ -40,24 +57,22 @@ pub struct Conditions<'a> {
 #[derive(Clone)]
 pub struct Reaction<'a> {
     main_pixel: &'a PixelStruct<'a>,
-    change: PixelChange<'a>,
+    change: PixelChange,
     conditions: Conditions<'a>,
     ratio: Vec<Ratio<'a>>,
     ratio_total: i32
 }
 
 #[derive(Copy, Clone)]
-pub struct PixelChange<'a> {
-    ptype: &'a PixelStruct<'a>,
-    bits: f64,
+pub struct PixelChange {
     stype: SimType,
     temp_change: f64,
 }
 
 #[derive(Copy, Clone)]
 pub struct Vec2Integer {
-    pub x: i64,
-    pub y: i64
+    pub x: usize,
+    pub y: usize
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -66,16 +81,15 @@ pub struct  Vec2Float {
     pub y: f64
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Pixel<'a> {
-    pub pixel_type: &'a PixelStruct<'a>,
-    bits: f64,
-    pub sim_type: SimType,
-    pub perfect_position: Vec2Float,
-    pub priority: i32,
-    pub simulate: bool,
-    pub tempature: f64,
-    pub changes: PixelChange<'a>
+    types: Vec<Pixel_types<'a>>,
+    sim_type: SimType,
+    perfect_position: Vec2Float,
+    priority: i32,
+    simulate: bool,
+    tempature: f64,
+    changes: PixelChange
 }
 
 struct GameStates {
@@ -113,7 +127,7 @@ impl Conditions<'_> {
 }
 
 impl Reaction<'_> {
-    fn new<'a>(m_pixel: &'a PixelStruct, products: Vec<Pixel>, changes: PixelChange<'a>, r_conditions: Conditions<'a>, ratios: Vec<Ratio<'a>>) -> Reaction<'a> {
+    fn new<'a>(m_pixel: &'a PixelStruct, products: Vec<Pixel>, changes: PixelChange, r_conditions: Conditions<'a>, ratios: Vec<Ratio<'a>>) -> Reaction<'a> {
         let mut total_of_ratios = 0;
         for ratio_num in 0..ratios.len() {
             total_of_ratios += ratios[ratio_num].ratio_num;
@@ -144,40 +158,51 @@ impl State<'_> {
 }
 
 impl Pixel<'_> {
-    fn new<'a>(ptypes: Vec<&'a PixelStruct>, pos: Vec2Float, stypes: Vec<SimType>) -> Pixel<'a> {
+    fn new<'a>(ptypes: Vec<Pixel_types<'a>>, pos: Vec2Float, stypes: SimType) -> Pixel<'a> {
         Pixel { 
-            pixel_type: ptypes[0], 
-            bits: 0.0,
+            types: ptypes,
             sim_type: SimType::Dust, 
             perfect_position: pos,
             priority: 0,
             simulate: false,
             tempature: 0.0,
-            changes: PixelChange::new(ptypes, stypes)
+            changes: PixelChange::new(stypes)
+        }
+    }
+
+    pub fn default<'a>() -> Pixel<'a> {
+        Pixel { 
+            types: vec![],
+            sim_type: SimType::None,
+            perfect_position: Vec2Float { x: 0.0, y: 0.0 },
+            priority: 0,
+            simulate: false, 
+            tempature: 0.0,
+            changes: PixelChange { stype: SimType::None, temp_change: 0.0 }
         }
     }
 }
 
-impl PixelChange<'_> {
-    fn new<'a>(pixels: Vec<&'a PixelStruct>, sim_type: Vec<SimType>) -> PixelChange<'a> {
+impl PixelChange {
+    fn new(sim_type: SimType) -> PixelChange {
         PixelChange {
-            ptype: pixels[1],
-            bits: 0.0,
-            stype: sim_type[0],
+            stype: sim_type,
             temp_change: 0.0,
         }
     }
 }
 
-pub fn coerce<'a, T>(_desired_life: &'a i8, coerced_life: &'a T) -> &'a T {
-    coerced_life
+impl TypeChanges<'_> { //may cause problems do to coersions
+    fn default<'a>(ptype: &'a PixelStruct<'a>) -> TypeChanges<'a> {
+        TypeChanges { new_type: ptype, bits: 0.0 }
+    }
 }
 
 pub fn cycle() {
      //reactions
-    let Pixels: Vec<PixelStruct>;
-    let mut state = State::new(vec![]);
-    let mut sim_areas = vec![];
+    let pixels: Vec<PixelStruct> = vec![PixelStruct {pixel: "NONE", reactions: vec![], id: 0}];
+    let mut state = State::new(pixels);
+    let mut sim_areas: Vec<Map> = vec![];
     let mut in_game = false;
     //main loop
     loop {
@@ -189,10 +214,11 @@ pub fn cycle() {
             },
             Menus::MainMenu => {
                 //do systems
+                let mutable = &mut state;
                 pioritize_pixels(&mut sim_areas);
-                calculate_pixel_changes(&mut state);
+                calculate_pixel_changes(mutable);
                 calculate_colisions();
-                finalize_changes(&mut state);
+                finalize_changes(mutable);
                 break;
             },
             Menus::InGame => {
@@ -204,25 +230,25 @@ pub fn cycle() {
 }
 
 
-fn pioritize_pixels(areas: &mut Vec<Map>,) {
+fn pioritize_pixels(areas: &mut Vec<Map>) {
     //make changes for all maps
     for maps in areas {
         //calculate and store priority
         let mut priority_total: i32 = 0;
-        for pixel in &maps.area {
+        for smrt_ref in &maps.area {
             //measure total priority
-            priority_total += pixel.priority;
+            priority_total += smrt_ref.get_immut().priority;
         }
         //set simulation on or off
-        for pixel in &mut maps.area {
+        for smrt_ref in &mut maps.area {
             
             let priority = priority_total / (SCREEN_HEIGHT * SCREEN_WIDTH) as i32;
-
+            let pixel = smrt_ref.get_mut();
             if pixel.priority >= priority {
                 pixel.simulate = true;
             }
             else {
-                pixel.simulate = false
+                pixel.simulate = false;
             }
         }
     }
@@ -230,48 +256,23 @@ fn pioritize_pixels(areas: &mut Vec<Map>,) {
 
 
 
-fn calculate_pixel_changes(state: &mut State) {
-    let mut maps = &mut state.simulated_area;
-    for map_num in 0..maps.len() {
-        let mut map = &mut maps[map_num]; //Current map
-        for p_num in 0..map.area.len() - 1{
-            
-            //heat changes
-            let mut pixel = map.area[p_num]; //the pixel
-            if pixel.simulate {
-                
-                    //indent for ownership then find pixels and heat change
-                let scoped_pixels = find_nearby_pixels(p_num); //Future changes need to made for more "diverse" maps
-                
-                for nearby_pixel in &scoped_pixels {
-                    
-                    let near_pixel = &mut map.area[*nearby_pixel]; //set to scanned pix
-                    let heat_difference = (near_pixel.tempature - pixel.tempature)/2.0;
-                    
-                    
-                    near_pixel.changes.temp_change += -heat_difference; //scanned pix
-                    
-
-                    pixel.changes.temp_change += heat_difference; //original pixel
-
-                }
-
-
-                for reaction in &pixel.pixel_type.reactions { //get reactions
-
-                    let mut ratio_requirements: Vec<(f64, Vec<&Pixel>)> = vec![]; //ajusted ration measurements
-
-                    for compared_pixel_num in &scoped_pixels {
-                        let compared_pix = &map.area[*compared_pixel_num];
-                        for ratio in &reaction.ratio  {
-                            if compared_pix.pixel_type.id == ratio.pixel_type.id {
-                                ratio_requirements.push((compared_pix.bits / ratio.ratio_num as f64, vec![compared_pix]));
-                            }
+fn calculate_pixel_changes(state: &mut State)    {
+    for map in state.simulated_area.iter_mut() { //
+        for enumeration in 0..SIZE {
+            let mut pixel = map.area[enumeration].clone(); //get pixel
+            if pixel.get_immut().simulate { //look for sim
+                {
+                    let mut scanned_pixels = find_nearby_pixels(enumeration, map); //find nearby pixels (4 pixels)
+                    {
+                        let sim_heat = pixel.get_immut().tempature; //get simulated pixels heat
+                        for mut scanned_pixel in scanned_pixels.drain(..) { //drain it
+                            let heat_diff = (scanned_pixel.get_immut().tempature - sim_heat)/16.0; //find hear difference and apply changes
+                            pixel.get_mut().changes.temp_change += heat_diff; //change iterated pixel
+                            scanned_pixel.get_mut().changes.temp_change += heat_diff; //change scanned pixel
                         }
                     }
                 }
-            }
-            map.area[p_num] = pixel;
+            }                      
         }
     }
 }
@@ -280,31 +281,35 @@ fn calculate_colisions() {
 
 }
 
-fn finalize_changes<'a>(state: &'a mut State<'a>) {
-    let mut maps = &mut state.simulated_area; //define the maps
-    let pixels = &mut state.pixel_types;
-    for map in maps {
-        for pixel in &mut map.area {
-            //change type
-            match pixel.changes.ptype {
-                _ => {
-                    pixel.pixel_type = &pixel.changes.ptype;
-                    pixel.changes.ptype = &pixels[0];
-                }
-            }
-            //change simulation type
-            match pixel.changes.stype {
-                SimType::None => {}
-                _ => {
-                    pixel.sim_type = pixel.changes.stype;
-                    pixel.changes.stype = SimType::None;
-                }
-            }
-            //Do tempature changes
+fn finalize_changes(state: &mut State) {
+    for map in state.simulated_area.iter_mut() {
+        for enumeration in 0..SIZE {
+            let mut pixel = map.area[enumeration].get_mut();
             pixel.tempature += pixel.changes.temp_change;
             pixel.changes.temp_change = 0.0;
+            /*
+            match pixel.changes.stype {
+                SimType::None => {},
+                _ => {pixel.sim_type = pixel.changes.stype}
+            }
 
-            //Do position changes
+            for pix_type in pixel.types.iter_mut() {
+                let id = pix_type.changes.new_type.id;
+                if id != 0 {
+                    pix_type.bits += -pix_type.changes.bits;
+                    let mut already_a_type = (false, 0);
+                    for types in pixel.types.iter_mut().enumerate() {
+                        if types.1.pixel_type.id == pix_type.changes.new_type.id {
+                            already_a_type = (true, types.0);
+                        }
+                    }
+                    if already_a_type.0 {
+                        pixel.types[already_a_type.1].bits += pix_type.changes.bits;
+                    } else {
+                        pixel.types.push(Pixel_types { pixel_type: pix_type.changes.new_type, bits: pix_type.changes.bits, changes: TypeChanges::default(&state.pixel_types[0])});
+                    }
+                }
+            } */
         }
     }
 }

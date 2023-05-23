@@ -1,0 +1,22 @@
+Unused for now:
+
+let mut maps = &mut state.simulated_area; //define the maps
+    let pixels = &mut state.pixel_types;
+    for map in maps {
+        for pixel in &mut map.area {
+            //change type
+            for ptype in pixel.get_mut().types.iter_mut() {
+                match ptype.changes.new_type {
+                    _ => {
+                        ptype.pixel_type = ptype.changes.new_type;
+                        ptype.changes.new_type = &pixels[0];
+                    }
+                }
+            }
+            //Do tempature changes
+            pixel.get_mut().tempature += pixel.get_mut().changes.temp_change;
+            pixel.get_mut().changes.temp_change = 0.0;
+
+            //Do position changes
+        }
+    }

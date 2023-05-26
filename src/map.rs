@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::SmartPointer::{Sr};
+use crate::smartpointer::{Sr};
 use std::mem::{self, MaybeUninit};
 
 #[derive(Copy, Clone, PartialEq)]
@@ -10,13 +10,13 @@ pub enum MapType {
     Random
 }
 
- pub struct Map<'a> {
+ pub struct Map {
     pub stype: MapType,
-    pub area: [Sr<Pixel<'a>>; (SCREEN_HEIGHT * SCREEN_WIDTH) as usize]
+    pub area: [Sr<Pixel>; (SCREEN_HEIGHT * SCREEN_WIDTH) as usize]
 } 
 
-impl Map<'_> {
-     pub fn create_map<'a>(map_type: MapType) -> Map<'a> {
+impl Map {
+     pub fn create_map<'a>(map_type: MapType) -> Map {
         Map { 
             stype: map_type, 
             area: {
@@ -36,18 +36,18 @@ impl Map<'_> {
 }
 
 
-pub fn index_pixel<'a>(point: Vec2Integer, map: &'a mut Map<'a>) -> &'a mut Pixel<'a> {
+pub fn index_pixel(point: Vec2Integer, map: &mut Map) -> &mut Pixel {
     map.area[(point.x * point.y) as usize].get_mut()
 } 
 
-pub fn in_bounds(point: Vec2Integer) -> bool {
-    let idx: usize = point.x * (SCREEN_HEIGHT as usize) + point.y;
+pub fn in_bounds(point: Vec2Float) -> bool {
+    let idx: f64 = (point.x * (SCREEN_HEIGHT) as f64 + point.y);
     
-    idx >= 0
-    && idx <= (SCREEN_HEIGHT * SCREEN_WIDTH) as usize
+    idx >= 0.0
+    && idx <= (SCREEN_HEIGHT * SCREEN_WIDTH) as f64
 }
 
-pub fn find_nearby_pixels<'a>(pos: usize, map: &mut Map<'a>) -> Vec<Sr<Pixel<'a>>> { //Needs map size inputs
+pub fn find_nearby_pixels(pos: usize, map: &mut Map) -> Vec<Sr<Pixel>> { //Needs map size inputs
     let mut pixels: Vec<Sr<Pixel>> = vec![];
     for scan_x in 0..1 {
         for scan_y in -1..1 {
@@ -77,7 +77,7 @@ pub fn find_adjacent_pixels(pos: usize) -> Vec<usize> {
 }
 
 fn number_to_coordinate(num: usize) -> Vec2Integer {
-    let y = num % SCREEN_WIDTH as usize;
-    let x = (num - y) / SCREEN_HEIGHT as usize;
+    let y = num as i64 % SCREEN_WIDTH;
+    let x = (num as i64 - y) / SCREEN_HEIGHT;
     Vec2Integer {x: x, y: y}
-}  
+}

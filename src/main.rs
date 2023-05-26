@@ -1,6 +1,6 @@
 mod map;
 mod main_cycle;
-mod SmartPointer;
+mod smartpointer;
 
 mod prelude {
     pub use crate::map::*;

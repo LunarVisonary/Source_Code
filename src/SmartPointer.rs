@@ -1,8 +1,5 @@
 use std::ptr::NonNull;
-use std::mem::{self, MaybeUninit};
 use std::alloc::{self, Layout};
-
-const SIZE: usize = 20;
 
 pub struct Sr<T>(NonNull<(T, i64)>);
 

@@ -40,36 +40,37 @@ pub fn index_pixel(point: Vec2Integer, map: &mut Map) -> &mut Pixel {
     map.area[(point.x * point.y) as usize].get_mut()
 } 
 
-pub fn in_bounds(point: Vec2Float) -> bool {
+pub fn in_bounds_vec(point: Vec2Float) -> bool {
     let idx: f64 = (point.x * (SCREEN_HEIGHT) as f64 + point.y);
     
     idx >= 0.0
     && idx <= (SCREEN_HEIGHT * SCREEN_WIDTH) as f64
 }
 
+pub fn in_bounds(point: i64) -> bool {
+    point >= 0 && point <= SCREEN_HEIGHT * SCREEN_WIDTH
+}
+
 pub fn find_nearby_pixels(pos: usize, map: &mut Map) -> Vec<Sr<Pixel>> { //Needs map size inputs
     let mut pixels: Vec<Sr<Pixel>> = vec![];
     for scan_x in 0..1 {
         for scan_y in -1..1 {
-            if scan_x != 0 || scan_y != 0{
-                if pos as i64 + (scan_x * SCREEN_HEIGHT) + scan_y > (SCREEN_HEIGHT * SCREEN_WIDTH) {
-                    pixels.push(map.area[pos + (scan_y + (scan_x * SCREEN_HEIGHT)) as usize].clone());
-                }
+            let point = pos as i64 + (scan_x * SCREEN_HEIGHT) + scan_y;
+            if scan_x != 0 || scan_y != 0 && in_bounds(point) {
+                pixels.push(map.area[point as usize].clone());
             }
         }
     }
     pixels
 }
 
-pub fn find_adjacent_pixels(pos: usize) -> Vec<usize> {
-    let mut adjacent_pixels: Vec<usize> = vec![];
+pub fn find_adjacent_pixels(map: &mut Map, pos: usize) -> Vec<Sr<Pixel>> {
+    let mut adjacent_pixels: Vec<Sr<Pixel>> = vec![];
     for scan_x in -1..1 {
         for scan_y in -1..1 {
-            let place = pos + ((scan_x * SCREEN_HEIGHT) + scan_y) as usize;
-            if place > (SCREEN_HEIGHT * SCREEN_WIDTH) as usize {
-                if scan_x != 0 || scan_y != 0 {
-                    adjacent_pixels.push(place)
-                }
+            let place = pos as i64 + ((scan_x * SCREEN_HEIGHT) + scan_y);
+            if scan_x != 0 || scan_y != 0 && in_bounds(place) {
+                adjacent_pixels.push(map.area[place as usize].clone());
             }
         }
     }

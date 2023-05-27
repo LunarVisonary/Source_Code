@@ -205,6 +205,7 @@ pub fn cycle() {
     let mut state = State::new(pixels);
     let mut sim_areas: Vec<Map> = vec![];
     let mut in_game = false;
+    let mut loop_num = 0;
     //main loop
     loop {
         //match game state
@@ -215,12 +216,13 @@ pub fn cycle() {
             },
             Menus::MainMenu => {
                 //do systems
+                loop_num += 1;
                 let mutable = &mut state;
                 pioritize_pixels(&mut sim_areas);
                 calculate_pixel_changes(mutable);
                 calculate_colisions();
                 finalize_changes(mutable);
-                break;
+                if loop_num >= 8 {break;}
             },
             Menus::InGame => {
                 in_game = true;
@@ -264,14 +266,33 @@ fn calculate_pixel_changes(state: &mut State)    {
             if pixel.get_immut().simulate { //look for sim
                 {
                     let mut scanned_pixels = find_nearby_pixels(enumeration, map); //find nearby pixels (4 pixels)
-                    {
-                        let sim_heat = pixel.get_immut().tempature; //get simulated pixels heat
-                        for mut scanned_pixel in scanned_pixels.drain(..) { //drain it
-                            let heat_diff = (scanned_pixel.get_immut().tempature - sim_heat)/16.0; //find hear difference and apply changes
-                            pixel.get_mut().changes.temp_change += heat_diff; //change iterated pixel
-                            scanned_pixel.get_mut().changes.temp_change += heat_diff; //change scanned pixel
-                        }
+                    let sim_heat = pixel.get_immut().tempature; //get simulated pixels heat
+                    for mut scanned_pixel in scanned_pixels.drain(..) { //drain it
+                        let heat_diff = (scanned_pixel.get_immut().tempature - sim_heat)/16.0; //find hear difference and apply changes
+                        pixel.get_mut().changes.temp_change += heat_diff; //change iterated pixel
+                        scanned_pixel.get_mut().changes.temp_change += heat_diff; //change scanned pixel
                     }
+                }
+                let mut adjacent_pixels = find_adjacent_pixels(map, enumeration); //find all adjacent pixels for reactions
+                for ptype in 0..pixel.get_immut().types.len() {
+                    for reaction in state.pixel_types[ptype].reactions.iter_mut()  {
+                        let mut requirements: Vec<f64> = vec![0.0; reaction.ratio.len()];
+                        for ratio in reaction.ratio.iter_mut().enumerate() {
+                            for nearby_pixel in adjacent_pixels.drain(..) {
+                                for scanned_ptype in 0..nearby_pixel.get_immut().types.len()  {
+                                    if scanned_ptype == ratio.1.pixel_type {
+                                        requirements[ratio.0] = nearby_pixel.get_immut().types[scanned_ptype].bits / ratio.1.ratio_num as f64;
+                                    }
+                                }
+                            }
+                        }
+                        let mut minimum: f64 = 0.0;
+                        for react_lvl in requirements.drain(..).enumerate() {
+                            if minimum > react_lvl.1 || react_lvl.0 == 0 {
+                                minimum = react_lvl.1;
+                            }
+                        }
+                    }           
                 }
             }                      
         }

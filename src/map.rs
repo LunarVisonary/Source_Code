@@ -41,7 +41,7 @@ pub fn index_pixel(point: Vec2Integer, map: &mut Map) -> &mut Pixel {
 } 
 
 pub fn in_bounds_vec(point: Vec2Float) -> bool {
-    let idx: f64 = (point.x * (SCREEN_HEIGHT) as f64 + point.y);
+    let idx: f64 = point.x * (SCREEN_HEIGHT) as f64 + point.y;
     
     idx >= 0.0
     && idx <= (SCREEN_HEIGHT * SCREEN_WIDTH) as f64

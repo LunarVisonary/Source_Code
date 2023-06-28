@@ -5,6 +5,9 @@ use  std::{time::{Duration, Instant}, cmp::min};
 pub const SCREEN_WIDTH: i64 = 5;
 pub const SCREEN_HEIGHT: i64 = 3; 
 pub const  SIZE: usize = (SCREEN_HEIGHT * SCREEN_WIDTH) as usize;
+const GRAVITY: f64 = 0.1;
+
+static mut DELTA: f64 = 1.0;
 
 #[derive(Copy, Clone)]
 enum Menus {
@@ -83,6 +86,7 @@ pub struct Pixel {
     types: Vec<Pixel_types>,
     sim_type: SimType,
     perfect_position: Vec2Float,
+    velocity: Vec2Float,
     priority: i32,
     simulate: bool,
     tempature: f64,
@@ -99,6 +103,12 @@ pub struct State {
  gamestate: Menus,
  pub simulated_area: Vec<Map>, //Needs finishing
  pub pixel_types: Vec<PixelStruct>
+}
+
+impl Vec2Integer {
+    fn to_one(&self) -> usize {
+        (self.x * SCREEN_WIDTH + self.y) as usize
+    }
 }
 
 impl Ratio {
@@ -166,6 +176,7 @@ impl Pixel {
             types: ptypes,
             sim_type: SimType::Dust, 
             perfect_position: pos,
+            velocity: Vec2Float { x: 0.0, y: 0.0 },
             priority: 0,
             simulate: false,
             tempature: 0.0,
@@ -180,6 +191,7 @@ impl Pixel {
             types: vec![],
             sim_type: SimType::None,
             perfect_position: Vec2Float { x: 0.0, y: 0.0 },
+            velocity: Vec2Float { x: 0.0, y: 0.0 },
             priority: 0,
             simulate: false, 
             tempature: 0.0,
@@ -221,9 +233,19 @@ impl TypeChanges { //may cause problems do to coersions
 
 impl SimType {
     fn find_velocity(&self, ptypes: &mut Vec<PixelStruct>, pixel_point: Vec2Integer, map: &mut Map) { //not done
+        let mut pixel = map.area[pixel_point.to_one()].clone();
+        pixel.get_mut().velocity.y += GRAVITY;
+        let adjacent_pixels = find_adjacent_pixels(map, pixel_point.to_one());
         match *self {
             Self::Dust => {
-
+                let velocity = &pixel.get_immut().velocity;
+                if absf64(velocity.y) > 0.1 || absf64(velocity.x) > 0.1 {
+                    if absf64(velocity.y) > absf64(velocity.x) {
+                        let side: i8 = {if velocity.y < 0.0 {1} else {-1}};
+                    } else {
+                        
+                    }
+                }
             }
             
             Self::Fluid => {
@@ -254,6 +276,14 @@ fn minf64(f1: f64, f2: f64) -> f64 {
         f2
     } else {
         f1
+    }
+}
+
+fn absf64(i: f64) -> f64 {
+    if i < 0.0 {
+        -i
+    } else {
+        i
     }
 }
 

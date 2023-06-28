@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::smartpointer::Sr;
-use  std::time::{Duration, Instant};
+use  std::{time::{Duration, Instant}, cmp::min};
 
 pub const SCREEN_WIDTH: i64 = 5;
 pub const SCREEN_HEIGHT: i64 = 3; 
@@ -14,12 +14,11 @@ enum Menus {
     InGame
 } 
 
-#[derive(Copy, Clone, PartialEq)]
 pub enum SimType {
     Dust,
     Fluid,
     Solid,
-    Special,
+    Special(*const dyn FnMut(&mut Map, &mut Vec2Integer, &mut Vec<PixelStruct>)),
     None
 }
 
@@ -37,14 +36,12 @@ struct Pixel_types {
     reactions: Vec<(*const Ratio, f64)>
 }
 
-#[derive(Clone)]
 pub struct PixelStruct {
     pixel: String,
     reactions: Vec<Reaction>,
     specificheat: f64
 }
 
-#[derive(Clone)]
 struct Ratio {
     pixel_type: usize,
     ratio_num: i32,
@@ -58,7 +55,6 @@ pub struct Conditions {
     pixels: Vec<usize>, 
 }
 
-#[derive(Clone)]
 pub struct Reaction {
     main_pixel: usize,
     conditions: Conditions,
@@ -66,7 +62,6 @@ pub struct Reaction {
     ratio_total: i32
 }
 
-#[derive(Copy, Clone)]
 pub struct PixelChange {
     stype: SimType,
     temp_change: f64,
@@ -84,7 +79,6 @@ pub struct  Vec2Float {
     pub y: f64
 }
 
-#[derive(Clone)]
 pub struct Pixel {
     types: Vec<Pixel_types>,
     sim_type: SimType,
@@ -194,6 +188,20 @@ impl Pixel {
             changes: PixelChange { stype: SimType::None, temp_change: 0.0 }
         }
     }
+
+    pub fn update_pixel(&mut self, types: &mut Vec<PixelStruct>) {
+        
+        let mut total_bits = 0.0;
+        let mut ash = 0.0; 
+
+        for ptype in self.types.iter() {
+            total_bits += ptype.bits;
+        }
+
+        for ptype in self.types.iter().enumerate() {
+            ash += types[ptype.0].specificheat * (ptype.1.bits/total_bits);
+        }
+    }
 }
 
 impl PixelChange {
@@ -211,6 +219,44 @@ impl TypeChanges { //may cause problems do to coersions
     }
 }
 
+impl SimType {
+    fn find_velocity(&self, ptypes: &mut Vec<PixelStruct>, pixel_point: Vec2Integer, map: &mut Map) { //not done
+        match *self {
+            Self::Dust => {
+
+            }
+            
+            Self::Fluid => {
+
+            }
+
+            Self::Solid => {
+
+            }
+
+            Self::Special(_) => {
+
+            }
+
+            Self::None => {}
+        }
+    }
+}
+
+impl Vec2Float {
+    fn floor_to_int(&self) -> Vec2Integer {
+        Vec2Integer {x: self.x as i64, y: self.y as i64}
+    }
+}
+
+fn minf64(f1: f64, f2: f64) -> f64 {
+    if f1 > f2 {
+        f2
+    } else {
+        f1
+    }
+}
+
 pub fn cycle() {
     //reactions
     let pixels: Vec<PixelStruct> = vec![PixelStruct {pixel: String::from("NONE"), reactions: vec![], specificheat: 0.0}];
@@ -218,7 +264,7 @@ pub fn cycle() {
     let mut sim_areas: Vec<Map> = vec![];
     let mut in_game = false;
     let mut loop_num = 0;
-    //main loop
+    //main loop 
     loop {
         //match game state
         match state.gamestate {
@@ -288,13 +334,13 @@ fn calculate_pixel_changes(state: &mut State)    {
                 let mut adjacent_pixels = find_adjacent_pixels(map, enumeration); //find all adjacent pixels for reactions
                 for ptype in 0..pixel.get_immut().types.len() {
                     for reaction in state.pixel_types[ptype].reactions.iter_mut()  {
-                        let mut requirements: Vec<(f64, Vec<*mut Pixel_types>)> = vec![(0.0, vec![]); reaction.ratio.len()];
+                        let mut requirements: Vec<(f64, Vec<(*mut Pixel_types, f64)>)> = vec![(0.0, vec![]); reaction.ratio.len()];
                         for ratio in reaction.ratio.iter_mut().enumerate() {
                             for mut nearby_pixel in adjacent_pixels.drain(..) {
                                 for scanned_ptype in 0..nearby_pixel.get_immut().types.len()  {
                                     if scanned_ptype == ratio.1.pixel_type {
                                         requirements[ratio.0].0 += nearby_pixel.get_immut().types[scanned_ptype].bits / ratio.1.ratio_num as f64;
-                                        requirements[ratio.0].1.push(&mut nearby_pixel.get_mut().types[scanned_ptype] as *mut Pixel_types);
+                                        requirements[ratio.0].1.push((&mut nearby_pixel.get_mut().types[scanned_ptype] as *mut Pixel_types, nearby_pixel.get_immut().types[scanned_ptype].bits));
                                     }
                                 }
                             }
@@ -307,14 +353,18 @@ fn calculate_pixel_changes(state: &mut State)    {
                         }
 
                         for reactionary_pix in requirements.drain(..).enumerate() {
-                            for pixels in reactionary_pix.1.1 {
+                            let reactionary_ratio = minimum / reactionary_pix.1.0;
+                            for pixel in reactionary_pix.1.1 {
                                 unsafe {
-                                    (*pixels).reactions.push((&reaction.ratio[reactionary_pix.0] as *const Ratio, minimum));
+                                    let smallest = minf64(minimum, pixel.1) * reactionary_ratio;
+                                    (*pixel.0).reactions.push((&reaction.ratio[reactionary_pix.0] as *const Ratio, smallest));
                                 }
                             }
                         }
                     }           
                 }
+                //physics simulation!
+                pixel.get_immut().sim_type.find_velocity(&mut state.pixel_types, pixel.get_immut().perfect_position.floor_to_int(), map);
             }                      
         }
     }
@@ -328,51 +378,67 @@ fn finalize_changes(state: &mut State) {
     for map in state.simulated_area.iter_mut() {
         for enumeration in 0..SIZE {
             let mut pixel = map.area[enumeration].get_mut();
-            pixel.tempature += pixel.changes.temp_change;
-            pixel.changes.temp_change = 0.0;
+            if pixel.simulate {
+                pixel.tempature += pixel.changes.temp_change;
+                pixel.changes.temp_change = 0.0;
 
-            for ptype in pixel.types.iter_mut() {
-                let reactions = ptype.reactions.len();
-                for reaction in ptype.reactions.drain(..) {
-                    unsafe {
-                        ptype.changes.bits += ((*reaction.0).type_change.bits * reaction.1) / reactions as f64; //change bits in future
-                        for new_types in (*reaction.0).type_change.new_type.iter() {
-                            let mut new_types = *new_types;
-                            new_types.1 = new_types.1 * reaction.1 / reactions as f64;
-                            ptype.changes.new_type.push(new_types); //add new types (ps news reaction adjustment and to be a vector)
+                for ptype in pixel.types.iter_mut() {
+                    let reactions = ptype.reactions.len();
+                    for reaction in ptype.reactions.drain(..) {
+                        unsafe {
+                            ptype.changes.bits += ((*reaction.0).type_change.bits * reaction.1) / reactions as f64; //change bits in future
+                            for new_types in (*reaction.0).type_change.new_type.iter() {
+                                let mut new_types = *new_types;
+                                new_types.1 = new_types.1 * reaction.1 / reactions as f64;
+                                ptype.changes.new_type.push(new_types); //add new types (ps news reaction adjustment and to be a vector)
+                            }
+                            pixel.tempature += ((*reaction.0).change.temp_change * reaction.1)/pixel.specific_heat * pixel.total_bits * reactions as f64; //
                         }
-                        pixel.tempature += ((*reaction.0).change.temp_change * reaction.1)/pixel.specific_heat * pixel.total_bits * reactions as f64; //
                     }
                 }
-            }
 
-            match pixel.changes.stype { //change simtype
-                SimType::None => {},
-                _ => {pixel.sim_type = pixel.changes.stype}
-            }
+                match pixel.changes.stype { //change simtype
+                    SimType::None => {},
+                    SimType::Dust => {
+                        pixel.sim_type = SimType::Dust
+                    },
+                    SimType::Fluid => {
+                        pixel.sim_type = SimType::Fluid
+                    },
+                    SimType::Solid => {
+                        pixel.sim_type = SimType::Solid
+                    },
+                    SimType::Special(x) => {
+                        pixel.sim_type = SimType::Special(x)
+                    }
+                }
 
-            {
-                for pix_type_num in 0..pixel.types.len() { //change pixel types
-                    for newtype in 0..pixel.types[pix_type_num].changes.new_type.len() {
-                        let types = &mut pixel.types;
-                        let id = types[pix_type_num].changes.new_type[newtype].0; //get change id
-                        if id != 0 { //scan for valid change type
-                            types[pix_type_num].bits += types[pix_type_num].changes.bits; //change bits
-                            let mut already_a_type = (false, 0); //look for pre-existing equal type
-                            for ptypes in types.iter().enumerate() { 
-                                if ptypes.1.pixel_type == types[pix_type_num].changes.new_type[newtype].0 { //if existing
-                                    already_a_type = (true, ptypes.0); //set true and get number
+                pixel.changes.stype = SimType::None;
+
+                {
+                    for pix_type_num in 0..pixel.types.len() { //change pixel types
+                        for newtype in 0..pixel.types[pix_type_num].changes.new_type.len() {
+                            let types = &mut pixel.types;
+                            let id = types[pix_type_num].changes.new_type[newtype].0; //get change id
+                            if id != 0 { //scan for valid change type
+                                types[pix_type_num].bits += types[pix_type_num].changes.bits; //change bits
+                                let mut already_a_type = (false, 0); //look for pre-existing equal type
+                                for ptypes in types.iter().enumerate() { 
+                                    if ptypes.1.pixel_type == types[pix_type_num].changes.new_type[newtype].0 { //if existing
+                                        already_a_type = (true, ptypes.0); //set true and get number
+                                    }
+                                }
+                                if already_a_type.0 { //if pre-existing
+                                    types[already_a_type.1].bits += types[pix_type_num].changes.bits;
+                                } else {
+                                    types.push(Pixel_types { pixel_type: types[pix_type_num].changes.new_type[newtype].0, bits: types[pix_type_num].changes.new_type[newtype].1, changes: TypeChanges::default(), reactions: vec![]});
                                 }
                             }
-                            if already_a_type.0 { //if pre-existing
-                                types[already_a_type.1].bits += types[pix_type_num].changes.bits;
-                            } else {
-                                types.push(Pixel_types { pixel_type: types[pix_type_num].changes.new_type[newtype].0, bits: types[pix_type_num].changes.new_type[newtype].1, changes: TypeChanges::default(), reactions: vec![]});
-                            }
                         }
                     }
-                }
-            }  
+                }  
+                pixel.update_pixel(&mut state.pixel_types);
+            }
         }
     }
 }

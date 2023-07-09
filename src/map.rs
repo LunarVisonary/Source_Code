@@ -4,21 +4,26 @@ use std::mem::{self, MaybeUninit};
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum MapType {
-    Full,
-    Player,
-    Space {x: usize, y: usize},
+    Planet,
+    Space {velocity: Vec2Float, position: Vec2Float},
+}
+
+pub enum PriorityType {
+    Full(f64),
     Random
 }
 
  pub struct Map {
     pub stype: MapType,
+    pub priority: PriorityType,
     pub area: [Sr<Pixel>; (SCREEN_HEIGHT * SCREEN_WIDTH) as usize]
 } 
 
 impl Map {
-     pub fn create_map<'a>(map_type: MapType) -> Map {
+     pub fn create_map(map_type: MapType) -> Map {
         Map { 
-            stype: map_type, 
+            stype: map_type,
+            priority: PriorityType::Full(0.0), 
             area: {
                 let mut x: [MaybeUninit<Sr<Pixel>>; SIZE] = unsafe {
                     MaybeUninit::uninit().assume_init()

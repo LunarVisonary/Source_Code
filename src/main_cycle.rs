@@ -20,9 +20,21 @@ enum Menus {
 pub enum SimType {
     Dust,
     Fluid,
-    Solid,
-    Special(*const dyn FnMut(&mut Map, &mut Vec2Integer, &mut Vec<PixelStruct>)),
+    Solid(Option<*mut PixelStructure>),
     None
+}
+
+struct PixelStructureRef {
+    pixel: *mut Pixel,
+    bstrength: f64,
+    bendcoe: f64,
+    connectedtoroot: bool,
+}
+
+struct PixelStructure {
+    pixels: Vec<PixelStructureRef>,
+    size: Vec2Integer,
+    root: usize,
 }
 
 #[derive(Clone)]
@@ -234,29 +246,17 @@ impl TypeChanges { //may cause problems do to coersions
 impl SimType {
     fn find_velocity(&self, ptypes: &mut Vec<PixelStruct>, pixel_point: Vec2Integer, map: &mut Map) { //not done
         let mut pixel = map.area[pixel_point.to_one()].clone();
-        pixel.get_mut().velocity.y += GRAVITY;
         let adjacent_pixels = find_adjacent_pixels(map, pixel_point.to_one());
         match *self {
             Self::Dust => {
-                let velocity = &pixel.get_immut().velocity;
-                if absf64(velocity.y) > 0.1 || absf64(velocity.x) > 0.1 {
-                    if absf64(velocity.y) > absf64(velocity.x) {
-                        let side: i8 = {if velocity.y < 0.0 {1} else {-1}};
-                    } else {
-                        
-                    }
-                }
+    
             }
             
             Self::Fluid => {
 
             }
 
-            Self::Solid => {
-
-            }
-
-            Self::Special(_) => {
+            Self::Solid(structure) => {
 
             }
 
@@ -308,7 +308,6 @@ pub fn cycle() {
                 let mutable = &mut state;
                 pioritize_pixels(&mut sim_areas);
                 calculate_pixel_changes(mutable);
-                calculate_colisions();
                 finalize_changes(mutable);
                 if loop_num >= 8 {break;}
             },
@@ -323,15 +322,17 @@ pub fn cycle() {
 
 fn pioritize_pixels(areas: &mut Vec<Map>) {
     //make changes for all maps
-    for maps in areas {
+    for map in areas {
         //calculate and store priority
-        let mut priority_total: i32 = 0;
-        for smrt_ref in &maps.area {
+        match map.priority {
+            PriorityType::Full(x) => {
+                let mut priority_total: i32 = 0;
+        for smrt_ref in &map.area {
             //measure total priority
             priority_total += smrt_ref.get_immut().priority;
         }
         //set simulation on or off
-        for smrt_ref in &mut maps.area {
+        for smrt_ref in &mut map.area {
             
             let priority = priority_total / (SCREEN_HEIGHT * SCREEN_WIDTH) as i32;
             let pixel = smrt_ref.get_mut();
@@ -340,6 +341,16 @@ fn pioritize_pixels(areas: &mut Vec<Map>) {
             }
             else {
                 pixel.simulate = false;
+            }
+        }
+            },
+            PriorityType::Random => {
+                for mut pixel_num in 0..map.area.len() {
+                    let pixel = map.area[pixel_num].get_mut();
+                    if pixel.priority > 0 {
+                        pixel.simulate = true;
+                    }
+                }
             }
         }
     }
@@ -394,14 +405,10 @@ fn calculate_pixel_changes(state: &mut State)    {
                     }           
                 }
                 //physics simulation!
-                pixel.get_immut().sim_type.find_velocity(&mut state.pixel_types, pixel.get_immut().perfect_position.floor_to_int(), map);
+                
             }                      
         }
     }
-}
-
-fn calculate_colisions() {
-
 }
 
 fn finalize_changes(state: &mut State) {
@@ -430,17 +437,14 @@ fn finalize_changes(state: &mut State) {
                 match pixel.changes.stype { //change simtype
                     SimType::None => {},
                     SimType::Dust => {
-                        pixel.sim_type = SimType::Dust
+                        pixel.sim_type = SimType::Dust;
                     },
                     SimType::Fluid => {
-                        pixel.sim_type = SimType::Fluid
+                        pixel.sim_type = SimType::Fluid;
                     },
-                    SimType::Solid => {
-                        pixel.sim_type = SimType::Solid
+                    SimType::Solid(x) => {
+                        pixel.sim_type = SimType::Solid(x);
                     },
-                    SimType::Special(x) => {
-                        pixel.sim_type = SimType::Special(x)
-                    }
                 }
 
                 pixel.changes.stype = SimType::None;

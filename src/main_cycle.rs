@@ -20,19 +20,20 @@ enum Menus {
 pub enum SimType {
     Dust,
     Fluid,
-    Solid(Option<*mut PixelStructure>),
+    Solid(Option<usize>),
     None
 }
 
 struct PixelStructureRef {
     pixel: *mut Pixel,
+    connections: Vec<usize>,
     bstrength: f64,
     bendcoe: f64,
     connectedtoroot: bool,
 }
 
 struct PixelStructure {
-    pixels: Vec<PixelStructureRef>,
+    pixels: Vec<Option<PixelStructureRef>>,
     size: Vec2Integer,
     root: usize,
 }
@@ -115,6 +116,69 @@ pub struct State {
  gamestate: Menus,
  pub simulated_area: Vec<Map>, //Needs finishing
  pub pixel_types: Vec<PixelStruct>
+}
+
+impl PixelStructure { //ALSO UNFINISHED
+    fn new(size: Vec2Integer, pixels: Vec<Option<PixelStructureRef>>, structures: &mut Vec<PixelStructure>) {
+        let mut root: usize = 0;
+        for pixelref in pixels.iter().enumerate() {
+            match *pixelref.1 {
+                None => {}
+                Some(_) => { //neeeds to check for multiple pixels or just one...
+                    root = pixelref.0 + 1;
+                    break;
+                }
+            }
+        }
+        if root > 0 {
+            let mut structure = PixelStructure {pixels: pixels, size: size, root: root};
+            structure.checkconnection(structures);
+            structures.push(structure);
+        } 
+    }
+
+    fn checkconnection(&mut self, listofstructures: &mut Vec<PixelStructure>) { //UNFINISHED NEEDS IMEDIATE REMEDY
+        let mut unfinished = true;
+        let mut pixelstocheck = vec![self.root];
+        let mut pixelstostage: Vec<usize> = vec![];
+        while unfinished {
+            for pixel in pixelstocheck.drain(..) {
+                let mut pixelref = match &mut self.pixels[pixel] {
+                    Some(pixel) => pixel,
+                    None => panic!("invalid structure (specifically false connection)"),
+                };
+                pixelref.connectedtoroot = true;
+                for connection in pixelref.connections.iter() {
+                    pixelstostage.push(*connection);
+                }
+            }
+            if pixelstostage.is_empty() {
+                unfinished = false;
+            } else {
+                pixelstocheck = pixelstostage;
+                pixelstostage = vec![];
+            }
+        }
+        let mut discconect: bool = false;
+        let mut newstruct: Vec<Option<PixelStructureRef>> = vec![];
+        let mut count: usize = 1;
+        for maybepixelref in self.pixels.iter_mut() {
+            match maybepixelref {
+                Some(pixelref) => {
+                    if !pixelref.connectedtoroot {
+                        newstruct.push(Some(PixelStructureRef { pixel: pixelref.pixel, connections: {let mut connections: Vec<usize> = vec![]; for connection in pixelref.connections.drain(..) {connections.push(connection);} connections}, bstrength: pixelref.bstrength, bendcoe: pixelref.bendcoe,connectedtoroot: false}));
+                        *maybepixelref = None;
+                        discconect = true;
+                    }
+                },
+                None => {newstruct.push(None);}
+            }
+            count += 1;
+        }
+        if discconect {
+            PixelStructure::new(self.size, newstruct, listofstructures);
+        }
+    }
 }
 
 impl Vec2Integer {

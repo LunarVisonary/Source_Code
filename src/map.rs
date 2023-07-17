@@ -4,7 +4,7 @@ use std::mem::{self, MaybeUninit};
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum MapType {
-    Planet,
+    Planet(Vec2Integer),
     Space {velocity: Vec2Float, position: Vec2Float},
 }
 

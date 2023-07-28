@@ -1,13 +1,13 @@
 use crate::prelude::*;
 use crate::smartpointer::Sr;
 use  std::{time::{Duration, Instant}, cmp::min};
+use std::f64::consts::PI;
 
-type CellestialBody = (Vec2Float, f64);
+type CellestialBody = (Vec2Float, f64, f64);
 
 pub const SCREEN_WIDTH: i64 = 5;
 pub const SCREEN_HEIGHT: i64 = 3; 
 pub const  SIZE: usize = (SCREEN_HEIGHT * SCREEN_WIDTH) as usize;
-const GRAVITY: f64 = 0.1;
 
 static mut DELTA: f64 = 1.0;
 
@@ -39,6 +39,11 @@ struct PixelStructure {
     pixels: Vec<Option<PixelStructureRef>>,
     size: Vec2Integer,
     root: usize,
+    velocity: Vec2Float,
+    rotation: f64,
+    center_of_mass: Vec2Float,
+    mass: f64,
+    angular_mass: f64
 }
 
 #[derive(Clone)]
@@ -124,25 +129,28 @@ pub struct State {
 }
 
 impl PixelStructure { //ALSO UNFINISHED
-    fn new(size: Vec2Integer, pixels: Vec<Option<PixelStructureRef>>, structures: &mut Vec<PixelStructure>) {
+    fn new(size: Vec2Integer, mut pixels: Vec<Option<PixelStructureRef>>, structures: &mut Vec<PixelStructure>, rotation: f64) {
         let mut root: usize = 0;
+        let mut tmass: f64 = 0.0;
         for pixelref in pixels.iter().enumerate() {
-            match *pixelref.1 {
+            match pixelref.1 {
                 None => {}
-                Some(_) => { //neeeds to check for multiple pixels or just one...
-                    root = pixelref.0 + 1;
-                    break;
+                Some(pixref) => { //neeeds to check for multiple pixels or just one...
+                    if root == 0 {
+                        root = pixelref.0;
+                    }
+                    tmass += unsafe {(*pixref.pixel).total_bits};
                 }
             }
         }
         if root > 0 {
-            let mut structure = PixelStructure {pixels: pixels, size: size, root: root};
-            structure.checkconnection(structures);
+            let mut structure = PixelStructure {pixels: pixels, size: size, root: root, velocity: {Vec2Float { x: 0.0, y: 0.0 }}, rotation: rotation, center_of_mass: Vec2Float { x: 0.0, y: 0.0 }, mass: tmass, angular_mass: 0.0}; //NEEDS FINISHING
+            structure.checkconnection(structures, rotation);
             structures.push(structure);
         } 
     }
 
-    fn checkconnection(&mut self, listofstructures: &mut Vec<PixelStructure>) { //Finished
+    fn checkconnection(&mut self, listofstructures: &mut Vec<PixelStructure>, rotation: f64) { //Finished
         let mut unfinished = true;
         let mut pixelstocheck = vec![self.root];
         let mut pixelstostage: Vec<usize> = vec![];
@@ -181,7 +189,7 @@ impl PixelStructure { //ALSO UNFINISHED
             count += 1;
         }
         if discconect {
-            PixelStructure::new(self.size, newstruct, listofstructures);
+            PixelStructure::new(self.size, newstruct, listofstructures, rotation);
         }
     }
 }
@@ -189,6 +197,12 @@ impl PixelStructure { //ALSO UNFINISHED
 impl Vec2Integer {
     fn to_one(&self) -> usize {
         (self.x * SCREEN_WIDTH + self.y) as usize
+    }
+    
+    fn number_to_coordinate(num: usize) -> Vec2Integer {
+        let y = num as i64 % SCREEN_WIDTH;
+        let x = (num as i64 - y) / SCREEN_HEIGHT;
+        Vec2Integer {x: x, y: y}
     }
 }
 
@@ -238,7 +252,7 @@ impl State {
             simulated_area: vec![],
             pixel_types: pixels,
             structures: vec![],
-            cellestial_bodies: vec![(Vec2Float {x: 10.0,y: -100.0}, 50.0)],
+            cellestial_bodies: vec![(Vec2Float {x: 10.0,y: -100.0}, 50.0, 5.0)],
             slider: 0
         }
     }
@@ -317,6 +331,26 @@ impl TypeChanges { //may cause problems do to coersions
 impl Vec2Float {
     fn floor_to_int(&self) -> Vec2Integer {
         Vec2Integer {x: self.x as i64, y: self.y as i64}
+    }
+
+    fn distance(&self) -> f64 {
+        ((self.x * self.x) + (self.y * self.y)).sqrt()
+    }
+
+    fn perpendicular(&self) -> Vec2Float {
+        Vec2Float { x: self.y, y: -self.x }
+    }
+
+    fn add(&self, second: Vec2Float) -> Vec2Float {
+        Vec2Float { x: self.x + second.x, y: self.y + second.y }
+    }
+
+    fn subtract(&self, second: Vec2Float) -> Vec2Float {
+        Vec2Float { x: self.x - second.x, y: self.y - second.y }
+    }
+
+    fn slope(&self) -> f64 {
+        self.y / self.x
     }
 }
 
@@ -472,9 +506,56 @@ fn calculate_pixel_changes(state: &mut State) {
                         }
                     };
                     let x_ydistance = Vec2Float {x: position.x - cellestial_body.0.x, y: position.y - cellestial_body.0.y};
-                    let distance = ((x_ydistance.x * x_ydistance.x) + (x_ydistance.y * x_ydistance.y)).sqrt();
+                    let distance = x_ydistance.distance();
                     let pixel = pixel.get_mut();
-                    pixel.velocity = Vec2Float {x: pixel.velocity.x + (x_ydistance.x / distance) * (cellestial_body.1 / (distance * distance)), y: pixel.velocity.y + (x_ydistance.y / distance) * (cellestial_body.1 / (distance * distance))};
+                    if distance < cellestial_body.2 {
+                        pixel.velocity = Vec2Float {x: pixel.velocity.x + (x_ydistance.x / distance) * (cellestial_body.1 / (distance * distance)), y: pixel.velocity.y + (x_ydistance.y / distance) * (cellestial_body.1 / (distance * distance))};
+                    } else {
+                        pixel.velocity = Vec2Float {x: pixel.velocity.x + ((x_ydistance.x / distance) * (cellestial_body.1 / (distance * distance)) * (distance / cellestial_body.2)), y: pixel.velocity.y}
+                    }
+                }
+                let pix = pixel.get_mut();
+                match pix.sim_type {
+                    SimType::Solid(structure) => {
+                        match structure {
+                            Some(coordinates) => {
+                                let structure = &mut state.structures[coordinates.0];
+                                let vel = structure.velocity;
+                                let mass = structure.mass;
+                                structure.velocity = Vec2Float {x: vel.x + (pix.velocity.x - vel.x) / mass, y: vel.y + (pix.velocity.y - vel.y) / mass};
+                                let pixel = Vec2Integer::number_to_coordinate(coordinates.1);
+                                let x_y_dis = structure.center_of_mass.subtract(Vec2Float { x: pixel.x as f64, y: pixel.y as f64 });
+                                let (distance, angle) = (x_y_dis.distance(), (x_y_dis.slope()).atan());
+                                let perp = x_y_dis.perpendicular();
+                                let spin_vel = Vec2Float {x: structure.rotation * perp.x, y: structure.rotation * perp.y};
+                                let adjusted_vel = pix.velocity.subtract(vel).subtract(spin_vel);
+                                structure.rotation += {
+                                    let perp_angle = (perp.y / perp.x).atan();
+                                    let multiplier = {
+                                        let pos = Vec2Integer::number_to_coordinate(coordinates.1);
+                                        let fpos = Vec2Float {x: pos.x as f64, y: pos.y as f64};
+                                        let delta_angle = fpos.add(adjusted_vel).subtract(structure.center_of_mass).slope().atan();
+                                        if angle > delta_angle {
+                                            if absf64(angle - delta_angle) > PI/2.0 {
+                                                -1.0
+                                            } else {
+                                                1.0
+                                            }
+                                        } else {
+                                            if absf64(angle - delta_angle) > PI/2.0 && angle < delta_angle {
+                                                1.0
+                                            } else {
+                                                -1.0
+                                            }
+                                        }
+                                    };
+                                    (absf64(((adjusted_vel.distance() * (absf64(perp_angle - angle).cos()) * distance) / structure.angular_mass) -(structure.rotation * distance)) * multiplier)//Is it positive or negative? Always positive :(
+                                };
+                            },
+                            None => {}
+                        }
+                    }
+                    _ => {}
                 }
             }                      
         }
@@ -512,7 +593,7 @@ fn finalize_changes(state: &mut State) {
                             SimType::Solid(pos) => {
                                 if let Some(x) = pos {
                                     state.structures[x.0].pixels[x.1] = None;
-                                    state.structures[x.0].checkconnection(unsafe {&mut (*everything_else).structures});
+                                    state.structures[x.0].checkconnection(unsafe {&mut (*everything_else).structures}, 0.0);
                                 }
                             }
                             _ => {}
@@ -546,6 +627,20 @@ fn finalize_changes(state: &mut State) {
                     }
                 }  
                 pixel.update_pixel(&mut state.pixel_types);
+            }
+            match pixel.sim_type { //TEMPORARY
+                    SimType::Solid(opstructure) => {if let Some(structure) = opstructure {
+                        let structureref = &mut state.structures[structure.0];
+                        pixel.velocity = structureref.velocity;
+                        let pixpoint = Vec2Integer::number_to_coordinate(structure.1);
+                        pixel.velocity = {
+                            let x_y_dis = Vec2Float {x: structureref.center_of_mass.x - pixpoint.x as f64, y: structureref.center_of_mass.x - pixpoint.x as f64};
+                            let perp = x_y_dis.perpendicular();
+                            pixel.velocity.add(Vec2Float { x: perp.x * structureref.rotation, y: perp.y * structureref.rotation })
+                        };
+                    }
+                },
+                _ => {}
             }
         }
     }

@@ -82,8 +82,3 @@ pub fn find_adjacent_pixels(map: &mut Map, pos: usize) -> Vec<Sr<Pixel>> {
     adjacent_pixels
 }
 
-fn number_to_coordinate(num: usize) -> Vec2Integer {
-    let y = num as i64 % SCREEN_WIDTH;
-    let x = (num as i64 - y) / SCREEN_HEIGHT;
-    Vec2Integer {x: x, y: y}
-}

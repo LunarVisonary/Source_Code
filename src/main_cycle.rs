@@ -8,6 +8,7 @@ type CellestialBody = (Vec2Float, f64, f64);
 pub const SCREEN_WIDTH: i64 = 5;
 pub const SCREEN_HEIGHT: i64 = 3; 
 pub const  SIZE: usize = (SCREEN_HEIGHT * SCREEN_WIDTH) as usize;
+const NINETY_DEGREES: f64 = PI / 2.0; 
 
 static mut DELTA: f64 = 1.0;
 
@@ -46,7 +47,9 @@ struct PixelStructure {
     size: Vec2Integer,
     root: usize,
     velocity: Vec2Float,
+    velocity_change: Vec2Float,
     rotation: f64,
+    rotation_change: f64,
     center_of_mass: Vec2Float,
     mass: f64,
     angular_mass: f64
@@ -138,7 +141,7 @@ pub struct State {
 }
 
 impl PixelStructure { //ALSO UNFINISHED
-    fn new(size: Vec2Integer, mut pixels: Vec<Option<PixelStructureRef>>, structures: &mut Vec<PixelStructure>, rotation: f64) {
+    fn new(size: Vec2Integer, mut pixels: Vec<Option<PixelStructureRef>>, structures: &mut Vec<PixelStructure>) {
         let mut root: usize = 0;
         let mut tmass: f64 = 0.0;
         for pixelref in pixels.iter().enumerate() {
@@ -153,14 +156,14 @@ impl PixelStructure { //ALSO UNFINISHED
             }
         }
         if root > 0 {
-            let mut structure = PixelStructure {pixels: pixels, size: size, root: root, velocity: {Vec2Float { x: 0.0, y: 0.0 }}, rotation: rotation, center_of_mass: Vec2Float { x: 0.0, y: 0.0 }, mass: tmass, angular_mass: 0.0}; //NEEDS FINISHING
-            structure.checkconnection(structures, rotation);
+            let mut structure = PixelStructure {pixels: pixels, size: size, root: root, velocity: {Vec2Float { x: 0.0, y: 0.0 }}, velocity_change: Vec2Float {x: 0.0, y: 0.0}, rotation: 0.0, rotation_change: 0.0, center_of_mass: Vec2Float { x: 0.0, y: 0.0 }, mass: tmass, angular_mass: 0.0}; //NEEDS FINISHING
+            structure.checkconnection(structures);
             structure.find_com_and_am();
             structures.push(structure);
         } 
     }
 
-    fn checkconnection(&mut self, listofstructures: &mut Vec<PixelStructure>, rotation: f64) { //Finished
+    fn checkconnection(&mut self, listofstructures: &mut Vec<PixelStructure>) { //Finished
         let mut unfinished = true;
         let mut pixelstocheck = vec![self.root];
         let mut pixelstostage: Vec<usize> = vec![];
@@ -200,7 +203,7 @@ impl PixelStructure { //ALSO UNFINISHED
             count += 1;
         }
         if discconect {
-            PixelStructure::new(self.size, newstruct, listofstructures, rotation);
+            PixelStructure::new(self.size, newstruct, listofstructures);
         }
     }
 
@@ -574,14 +577,14 @@ fn calculate_pixel_changes(state: &mut State) {
                                 let structure = &mut state.structures[coordinates.0];
                                 let vel = structure.velocity;
                                 let mass = structure.mass;
-                                structure.velocity = Vec2Float {x: vel.x + (pix.velocity.x - vel.x) / mass, y: vel.y + (pix.velocity.y - vel.y) / mass};
+                                structure.velocity_change = structure.velocity_change.add(Vec2Float {x: (pix.velocity.x - vel.x) * pix.total_bits / mass, y: ((pix.velocity.y - vel.y) * pix.total_bits) / mass});
                                 let pixel = Vec2Integer::number_to_coordinate(coordinates.1);
                                 let x_y_dis = structure.center_of_mass.subtract(Vec2Float { x: pixel.x as f64, y: pixel.y as f64 });
                                 let (distance, angle) = (x_y_dis.distance(), (x_y_dis.slope()).atan());
                                 let perp = x_y_dis.perpendicular();
                                 let spin_vel = Vec2Float {x: structure.rotation * perp.x, y: structure.rotation * perp.y};
                                 let adjusted_vel = pix.velocity.subtract(vel).subtract(spin_vel);
-                                structure.rotation += {
+                                structure.rotation_change += {
                                     let perp_angle = (perp.y / perp.x).atan();
                                     let multiplier = {
                                         let pos = Vec2Integer::number_to_coordinate(coordinates.1);
@@ -589,13 +592,13 @@ fn calculate_pixel_changes(state: &mut State) {
                                         
                                         let delta_angle = fpos.add(adjusted_vel.multiply_by_scalar(distance).divide_by_scalar(adjusted_vel.distance() * 2.0)).subtract(structure.center_of_mass).slope().atan();
                                         if angle > delta_angle {
-                                            if absf64(angle - delta_angle) > PI/2.0 {
+                                            if absf64(angle - delta_angle) > NINETY_DEGREES {
                                                 -1.0
                                             } else {
                                                 1.0
                                             }
                                         } else {
-                                            if absf64(angle - delta_angle) > PI/2.0 {
+                                            if absf64(angle - delta_angle) > NINETY_DEGREES {
                                                 1.0
                                             } else {
                                                 -1.0
@@ -616,6 +619,10 @@ fn calculate_pixel_changes(state: &mut State) {
 }
 
 fn calculate_collisions(state: &mut State) {
+    for structure in state.structures.iter_mut() {
+        structure.velocity = structure.velocity.add(structure.velocity_change);
+        structure.rotation += structure.rotation_change;
+    }
     let simulated_pixels = [false; (SCREEN_HEIGHT * SCREEN_WIDTH) as usize];
     for map in state.simulated_area.iter_mut() {
         for pixelpos in 0..map.area.len() {
@@ -623,6 +630,22 @@ fn calculate_collisions(state: &mut State) {
             let mut pixel_stack: Vec<Sr<Pixel>> = vec![pixelref.clone()];
             let mut pix_count = 1;
             let mut unfinished = true;
+            {
+                let pixel = pixelref.get_mut();
+                match pixel.sim_type { 
+                    SimType::Solid(opstructure) => {if let Some(structure) = opstructure {
+                            let structureref = &mut state.structures[structure.0];
+                            let pixpoint = Vec2Integer::number_to_coordinate(structure.1);
+                                pixel.velocity = {
+                                let x_y_dis = Vec2Float {x: structureref.center_of_mass.x - pixpoint.x as f64, y: structureref.center_of_mass.x - pixpoint.x as f64};
+                                let perp = x_y_dis.perpendicular();
+                                structureref.velocity.add(Vec2Float { x: perp.x * structureref.rotation, y: perp.y * structureref.rotation })
+                            }; 
+                        }
+                    },
+                _ => {}
+                }
+            }
             while unfinished {
                 let pixel = pixel_stack[pix_count - 1].get_immut();
                 let (new_pos, real) = {
@@ -696,7 +719,7 @@ fn finalize_changes(state: &mut State) {
                             SimType::Solid(pos) => {
                                 if let Some(x) = pos {
                                     state.structures[x.0].pixels[x.1] = None;
-                                    state.structures[x.0].checkconnection(unsafe {&mut (*everything_else).structures}, 0.0);
+                                    state.structures[x.0].checkconnection(unsafe {&mut (*everything_else).structures});
                                 }
                             }
                             _ => {}
@@ -730,20 +753,6 @@ fn finalize_changes(state: &mut State) {
                     }
                 }  
                 pixel.update_pixel(&mut state.pixel_types);
-            }
-            match pixel.sim_type { //TEMPORARY
-                    SimType::Solid(opstructure) => {if let Some(structure) = opstructure {
-                        let structureref = &mut state.structures[structure.0];
-                        pixel.velocity = structureref.velocity;
-                        let pixpoint = Vec2Integer::number_to_coordinate(structure.1);
-                        /* pixel.velocity = {
-                            let x_y_dis = Vec2Float {x: structureref.center_of_mass.x - pixpoint.x as f64, y: structureref.center_of_mass.x - pixpoint.x as f64};
-                            let perp = x_y_dis.perpendicular();
-                            pixel.velocity.add(Vec2Float { x: perp.x * structureref.rotation, y: perp.y * structureref.rotation })
-                        }; */
-                    }
-                },
-                _ => {}
             }
         }
     }

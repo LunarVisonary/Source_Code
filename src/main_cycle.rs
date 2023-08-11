@@ -507,9 +507,13 @@ fn calculate_pixel_changes(state: &mut State) {
                     let mut scanned_pixels = find_nearby_pixels(enumeration, map); //find nearby pixels (4 pixels)
                     let sim_heat = pixel.get_immut().tempature; //get simulated pixels heat
                     for mut scanned_pixel in scanned_pixels.drain(..) { //drain it
-                        let heat_diff = (scanned_pixel.get_immut().tempature - sim_heat)/16.0; //find hear difference and apply changes
-                        pixel.get_mut().changes.temp_change += heat_diff; //change iterated pixel
-                        scanned_pixel.get_mut().changes.temp_change += heat_diff; //change scanned pixel
+                        let heat_diff = (scanned_pixel.get_immut().tempature - sim_heat)/16.0; //find difference and apply changes
+                        let ratio = {
+                            let pixelref = pixel.get_immut();
+                            pixelref.tempature / (pixelref.tempature + scanned_pixel.get_immut().tempature)
+                        };
+                        pixel.get_mut().changes.temp_change += heat_diff * (1.0 - ratio); //change iterated pixel
+                        scanned_pixel.get_mut().changes.temp_change += heat_diff * ratio; //change scanned pixel
                     }
                 }
                 let mut adjacent_pixels = find_adjacent_pixels(map, enumeration); //find all adjacent pixels for reactions

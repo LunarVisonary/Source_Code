@@ -27,6 +27,12 @@ pub enum SimType {
     None
 }
 
+struct TypeBendData {
+    strength: f64,
+    rigidity: f64,
+    relasticity: f64
+}
+
 struct PixelStructureRef {
     pixel: *mut Pixel,
     connections: Vec<usize>,
@@ -62,8 +68,11 @@ struct Pixel_types {
 
 pub struct PixelStruct {
     pixel: String,
+    sim_type: SimType,
     reactions: Vec<Reaction>,
-    specificheat: f64
+    strength: Option<TypeBendData>,
+    specificheat: f64,
+    pressure_line: (f64, f64),
 }
 
 struct Ratio {
@@ -146,6 +155,7 @@ impl PixelStructure { //ALSO UNFINISHED
         if root > 0 {
             let mut structure = PixelStructure {pixels: pixels, size: size, root: root, velocity: {Vec2Float { x: 0.0, y: 0.0 }}, rotation: rotation, center_of_mass: Vec2Float { x: 0.0, y: 0.0 }, mass: tmass, angular_mass: 0.0}; //NEEDS FINISHING
             structure.checkconnection(structures, rotation);
+            structure.find_com_and_am();
             structures.push(structure);
         } 
     }
@@ -179,6 +189,7 @@ impl PixelStructure { //ALSO UNFINISHED
             match maybepixelref {
                 Some(pixelref) => {
                     if !pixelref.connectedtoroot {
+                        self.mass += -unsafe {(*pixelref.pixel).total_bits};
                         newstruct.push(Some(PixelStructureRef { pixel: pixelref.pixel, connections: {let mut connections: Vec<usize> = vec![]; for connection in pixelref.connections.drain(..) {connections.push(connection);} connections}, bstrength: pixelref.bstrength, bendcoe: pixelref.bendcoe,connectedtoroot: false}));
                         *maybepixelref = None;
                         discconect = true;
@@ -192,17 +203,45 @@ impl PixelStructure { //ALSO UNFINISHED
             PixelStructure::new(self.size, newstruct, listofstructures, rotation);
         }
     }
+
+
+    fn find_com_and_am(&mut self) {
+        let mass = self.mass;
+        let mut com = Vec2Float {x: 0.0, y: 0.0};
+        let mut angular_mass = 0.0;
+        for maybepix in self.pixels.iter().enumerate() {
+            if let Some(pixelref) = maybepix.1 {
+                let pos = Vec2Integer::number_to_coordinate(maybepix.0);
+                let x_y_distance = Vec2Float {x: pos.x as f64, y: pos.y as f64}.subtract(com);
+                com = com.add(x_y_distance.multiply_by_scalar(unsafe {(*pixelref.pixel).total_bits}).divide_by_scalar(mass));
+            }
+        }
+        for maybepix in self.pixels.iter().enumerate() {
+            if let Some(pixelref) = maybepix.1 {
+                let coordinate = Vec2Integer::number_to_coordinate(maybepix.0);
+                let fpos = Vec2Float {x: coordinate.x as f64, y: coordinate.y as f64};
+                let distance = fpos.subtract(com).distance();
+                angular_mass += unsafe {(*pixelref.pixel).total_bits} * distance;
+            }
+        }
+        self.angular_mass = angular_mass;
+        self.center_of_mass = com;
+    }
 }
 
 impl Vec2Integer {
-    fn to_one(&self) -> usize {
-        (self.x * SCREEN_WIDTH + self.y) as usize
+    fn to_one(&self) -> i64 {
+        self.x * SCREEN_WIDTH + self.y
     }
     
     fn number_to_coordinate(num: usize) -> Vec2Integer {
         let y = num as i64 % SCREEN_WIDTH;
         let x = (num as i64 - y) / SCREEN_HEIGHT;
         Vec2Integer {x: x, y: y}
+    }
+
+    fn equals(&self, second: Vec2Integer) -> bool {
+        self.x == second.x && self.y == second.y
     }
 }
 
@@ -352,6 +391,14 @@ impl Vec2Float {
     fn slope(&self) -> f64 {
         self.y / self.x
     }
+
+    fn divide_by_scalar(&self, second: f64) -> Vec2Float {
+        Vec2Float { x: self.x / second, y: self.y / second }
+    }
+
+    fn multiply_by_scalar(&self, second: f64) -> Vec2Float {
+        Vec2Float { x: self.x * second, y: self.y * second }
+    }
 }
 
 fn minf64(f1: f64, f2: f64) -> f64 {
@@ -370,9 +417,13 @@ fn absf64(i: f64) -> f64 {
     }
 }
 
+fn get_sign_as_onef64(i: f64) -> f64 {
+    i / absf64(i)
+}
+
 pub fn cycle() {
     //reactions
-    let pixels: Vec<PixelStruct> = vec![PixelStruct {pixel: String::from("NONE"), reactions: vec![], specificheat: 0.0}];
+    let pixels: Vec<PixelStruct> = vec![PixelStruct {pixel: String::from("NONE"), reactions: vec![], sim_type: SimType::None, strength: None, specificheat: 0.0, pressure_line: (0.0, 0.0)}];
     let mut state = State::new(pixels);
     let mut sim_areas: Vec<Map> = vec![];
     let mut in_game = false;
@@ -391,6 +442,7 @@ pub fn cycle() {
                 let mutable = &mut state;
                 pioritize_pixels(&mut sim_areas);
                 calculate_pixel_changes(mutable);
+                calculate_collisions(mutable);
                 finalize_changes(mutable);
                 if loop_num >= 8 {break;}
             },
@@ -534,7 +586,8 @@ fn calculate_pixel_changes(state: &mut State) {
                                     let multiplier = {
                                         let pos = Vec2Integer::number_to_coordinate(coordinates.1);
                                         let fpos = Vec2Float {x: pos.x as f64, y: pos.y as f64};
-                                        let delta_angle = fpos.add(adjusted_vel).subtract(structure.center_of_mass).slope().atan();
+                                        
+                                        let delta_angle = fpos.add(adjusted_vel.multiply_by_scalar(distance).divide_by_scalar(adjusted_vel.distance() * 2.0)).subtract(structure.center_of_mass).slope().atan();
                                         if angle > delta_angle {
                                             if absf64(angle - delta_angle) > PI/2.0 {
                                                 -1.0
@@ -542,14 +595,14 @@ fn calculate_pixel_changes(state: &mut State) {
                                                 1.0
                                             }
                                         } else {
-                                            if absf64(angle - delta_angle) > PI/2.0 && angle < delta_angle {
+                                            if absf64(angle - delta_angle) > PI/2.0 {
                                                 1.0
                                             } else {
                                                 -1.0
                                             }
                                         }
                                     };
-                                    (absf64(((adjusted_vel.distance() * (absf64(perp_angle - angle).cos()) * distance) / structure.angular_mass) -(structure.rotation * distance)) * multiplier)//Is it positive or negative? Always positive :(
+                                    ((((adjusted_vel.distance() * (absf64(perp_angle - angle).cos()) * distance) / structure.angular_mass)) * multiplier)//Is it positive or negative? Always positive :(
                                 };
                             },
                             None => {}
@@ -558,6 +611,56 @@ fn calculate_pixel_changes(state: &mut State) {
                     _ => {}
                 }
             }                      
+        }
+    }
+}
+
+fn calculate_collisions(state: &mut State) {
+    let simulated_pixels = [false; (SCREEN_HEIGHT * SCREEN_WIDTH) as usize];
+    for map in state.simulated_area.iter_mut() {
+        for pixelpos in 0..map.area.len() {
+            let mut pixelref = map.area[pixelpos].clone();
+            let mut pixel_stack: Vec<Sr<Pixel>> = vec![pixelref.clone()];
+            let mut pix_count = 1;
+            let mut unfinished = true;
+            while unfinished {
+                let pixel = pixel_stack[pix_count - 1].get_immut();
+                let (new_pos, real) = {
+                    let x_bigger = absf64(pixel.velocity.x) > absf64(pixel.velocity.y);
+                    let mut loops: usize = 1;
+                    let distance = (pixel.velocity.distance() / unsafe {DELTA}).floor() as usize;
+                    let mut real_colision: bool = false;
+                    let mut continue_phy = true;
+                    let mut  new_pos: i64 = 0;
+                    while continue_phy {
+                        new_pos = if x_bigger { //could be more descript
+                            pixel.perfect_position.add(pixel.velocity.divide_by_scalar((pixel.velocity.x / loops as f64))).floor_to_int().to_one()
+                        } else {
+                            pixel.perfect_position.add(pixel.velocity.divide_by_scalar((pixel.velocity.y / loops as f64))).floor_to_int().to_one()
+                        };
+                        loops += 1;
+                        if loops <= distance && in_bounds(new_pos) {
+                            match map.area[new_pos as usize].get_immut().sim_type {
+                                SimType::None => {
+                                    continue_phy = false;
+                                },
+                                _ => {
+                                    continue_phy = false;
+                                    real_colision = true;
+                                }
+                            }
+                        } else {
+                            continue_phy =false;
+                        }
+                    }
+                    (new_pos, real_colision)
+                };
+                if real {
+                    pixel_stack.push(map.area[new_pos as usize].clone());
+                } else {
+                    unfinished = false;
+                }
+            }
         }
     }
 }
@@ -633,11 +736,11 @@ fn finalize_changes(state: &mut State) {
                         let structureref = &mut state.structures[structure.0];
                         pixel.velocity = structureref.velocity;
                         let pixpoint = Vec2Integer::number_to_coordinate(structure.1);
-                        pixel.velocity = {
+                        /* pixel.velocity = {
                             let x_y_dis = Vec2Float {x: structureref.center_of_mass.x - pixpoint.x as f64, y: structureref.center_of_mass.x - pixpoint.x as f64};
                             let perp = x_y_dis.perpendicular();
                             pixel.velocity.add(Vec2Float { x: perp.x * structureref.rotation, y: perp.y * structureref.rotation })
-                        };
+                        }; */
                     }
                 },
                 _ => {}

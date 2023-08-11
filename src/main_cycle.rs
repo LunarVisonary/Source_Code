@@ -402,6 +402,11 @@ impl Vec2Float {
     fn multiply_by_scalar(&self, second: f64) -> Vec2Float {
         Vec2Float { x: self.x * second, y: self.y * second }
     }
+
+    fn dot_product(&self, second: &Vec2Float) -> f64 {
+        let divisor = (self.x * second.x) + (self.y * second.y);
+        (divisor / (self.distance() * second.distance())).acos()
+    }
 }
 
 fn minf64(f1: f64, f2: f64) -> f64 {
@@ -560,6 +565,7 @@ fn calculate_pixel_changes(state: &mut State) {
                             }
                         }
                     };
+                    //GRAVITY TIME
                     let x_ydistance = Vec2Float {x: position.x - cellestial_body.0.x, y: position.y - cellestial_body.0.y};
                     let distance = x_ydistance.distance();
                     let pixel = pixel.get_mut();
@@ -569,6 +575,7 @@ fn calculate_pixel_changes(state: &mut State) {
                         pixel.velocity = Vec2Float {x: pixel.velocity.x + ((x_ydistance.x / distance) * (cellestial_body.1 / (distance * distance)) * (distance / cellestial_body.2)), y: pixel.velocity.y}
                     }
                 }
+                //STRUCTURAL TIME
                 let pix = pixel.get_mut();
                 match pix.sim_type {
                     SimType::Solid(structure) => {
@@ -585,27 +592,15 @@ fn calculate_pixel_changes(state: &mut State) {
                                 let spin_vel = Vec2Float {x: structure.rotation * perp.x, y: structure.rotation * perp.y};
                                 let adjusted_vel = pix.velocity.subtract(vel).subtract(spin_vel);
                                 structure.rotation_change += {
-                                    let perp_angle = (perp.y / perp.x).atan();
                                     let multiplier = {
-                                        let pos = Vec2Integer::number_to_coordinate(coordinates.1);
-                                        let fpos = Vec2Float {x: pos.x as f64, y: pos.y as f64};
-                                        
-                                        let delta_angle = fpos.add(adjusted_vel.multiply_by_scalar(distance).divide_by_scalar(adjusted_vel.distance() * 2.0)).subtract(structure.center_of_mass).slope().atan();
-                                        if angle > delta_angle {
-                                            if absf64(angle - delta_angle) > NINETY_DEGREES {
-                                                -1.0
-                                            } else {
-                                                1.0
-                                            }
+                                        let angle_diff = perp.dot_product(&adjusted_vel);
+                                        if angle_diff > NINETY_DEGREES {
+                                            -1.0
                                         } else {
-                                            if absf64(angle - delta_angle) > NINETY_DEGREES {
-                                                1.0
-                                            } else {
-                                                -1.0
-                                            }
+                                            1.0
                                         }
                                     };
-                                    ((((adjusted_vel.distance() * (absf64(perp_angle - angle).cos()) * distance) / structure.angular_mass)) * multiplier)//Is it positive or negative? Always positive :(
+                                    ((((adjusted_vel.distance() * absf64(perp.slope().atan() - angle.cos()) * distance) / structure.angular_mass)) * multiplier)
                                 };
                             },
                             None => {}
@@ -683,6 +678,15 @@ fn calculate_collisions(state: &mut State) {
                 } else {
                     unfinished = false;
                 }
+            }
+            unfinished = true;
+            let mut count_down: i64 = (pixel_stack.len() -2) as i64;
+            while unfinished {
+                for collision in pixel_stack.len() - 1..pix_count {
+
+                }
+                count_down -1;
+                unfinished = count_down >= 0;
             }
         }
     }
